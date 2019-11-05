@@ -2,6 +2,7 @@ import pygame
 from random import randint
 from DQN import DQNAgent
 import numpy as np
+from keras.models import load_model
 from keras.utils import to_categorical
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -9,9 +10,16 @@ import numpy as np
 
 # Set options to activate or deactivate the game view, and its speed
 display_option = False
-speed = 0
+speed = 0 # set to 0 to run at max frame rate
+total_games = 150 # how many games to run before stopping
+epsilon_range = 200 # random number of this range is thrown against the epsilon offset
+epsilon_offset = 80 # this number counts down with each completed game, so only this number of games has any chance of randomness
+restore_model = False # set to true to restore the previous model instead of starting with a blank one
 pygame.font.init()
 
+# other hard-coded values
+weights_file = 'weights.hdf5'
+model_file = 'model.hdf5'
 
 class Game:
 
@@ -50,7 +58,7 @@ class Player(object):
             self.position[-1][0] = x
             self.position[-1][1] = y
 
-    def do_move(self, move, x, y, game, food,agent):
+    def do_move(self, move, x, y, game, food, agent):
         move_array = [self.x_change, self.y_change]
 
         if self.eaten:
@@ -172,11 +180,13 @@ def plot_seaborn(array_counter, array_score):
 def run():
     pygame.init()
     agent = DQNAgent()
+    if restore_model:
+        agent.model = load_model(model_file)
     counter_games = 0
     score_plot = []
     counter_plot =[]
     record = 0
-    while counter_games < 150:
+    while counter_games < total_games:
         # Initialize classes
         game = Game(440, 440)
         player1 = game.player
@@ -189,11 +199,11 @@ def run():
 
         while not game.crash:
             #agent.epsilon is set to give randomness to actions
-            agent.epsilon = 80 - counter_games
-            
+            agent.epsilon = epsilon_offset - counter_games
+
             #get old state
             state_old = agent.get_state(game, player1, food1)
-            
+
             #perform random actions based on agent.epsilon, or choose the action
             if randint(0, 200) < agent.epsilon:
                 final_move = to_categorical(randint(0, 2), num_classes=3)
@@ -201,30 +211,33 @@ def run():
                 # predict action based on the old state
                 prediction = agent.model.predict(state_old.reshape((1,11)))
                 final_move = to_categorical(np.argmax(prediction[0]), num_classes=3)
-                
+
             #perform new move and get new state
             player1.do_move(final_move, player1.x, player1.y, game, food1, agent)
             state_new = agent.get_state(game, player1, food1)
-            
+
             #set treward for the new state
             reward = agent.set_reward(player1, game.crash)
-            
+
             #train short memory base on the new action and state
             agent.train_short_memory(state_old, final_move, reward, state_new, game.crash)
-            
+
             # store the new data into a long term memory
             agent.remember(state_old, final_move, reward, state_new, game.crash)
             record = get_record(game.score, record)
             if display_option:
                 display(player1, food1, game, record)
                 pygame.time.wait(speed)
-        
+
         agent.replay_new(agent.memory)
         counter_games += 1
         print('Game', counter_games, '      Score:', game.score)
         score_plot.append(game.score)
         counter_plot.append(counter_games)
-    agent.model.save_weights('weights.hdf5')
+    agent.model.save(model_file)
+    agent.model.save_weights(weights_file)
+
+    # draw the final analysis
     plot_seaborn(counter_plot, score_plot)
 
 
